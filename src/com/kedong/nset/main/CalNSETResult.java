@@ -5,6 +5,7 @@ import java.util.Vector;
 
 import com.kedong.nset.base.DBOperate;
 import com.kedong.nset.base.Env;
+import com.kedong.nset.base.Utilities;
 import com.kedong.nset.bean.WindGenParaBean;
 
 public class CalNSETResult {
@@ -12,6 +13,7 @@ public class CalNSETResult {
 	private static int index;
 	private double avgBound;
 	private double sqtBound;
+	private Vector<StandardData>standardVect;
 	
 	public CalNSETResult(){
 		Env env = Env.getInstance();
@@ -19,8 +21,57 @@ public class CalNSETResult {
 		String writeOrWrongBound = env.getProperty("RightOrWrongBound");
 		avgBound = Double.parseDouble(writeOrWrongBound.split(",")[0]);
 		sqtBound = Double.parseDouble(writeOrWrongBound.split(",")[1]);
+		String standardMinMaxArray[] = env.get("StandardMinMax").toString().split(";");
+		standardVect = new Vector<StandardData>();
+		for(int i=0;i<standardMinMaxArray.length;i++){
+			Double min = Double.parseDouble(standardMinMaxArray[i].split(",")[0].toString());
+			Double max = Double.parseDouble(standardMinMaxArray[i].split(",")[1].toString());
+			StandardData temp = new StandardData(min,max);
+			standardVect.add(temp);
+		}
 	}
 	
+	/**
+	 *	对有问题数据进行修正 
+	 * @param originalData 待修正数据
+	 * @param memoryVectVect 记忆矩阵
+	 * @return
+	 */
+	public Vector<Double> correctData(Vector<Double>originalData,Vector<Vector<Double>>memoryVectVect){
+		Vector<Double>correctedData = new Vector<Double>();
+		for(int j=0;j<originalData.size();j++){
+			correctedData.add(originalData.get(j));
+		}
+		
+		int i=0;
+		for(;i<memoryVectVect.size();i++){
+			if(originalData.get(0)<memoryVectVect.get(i).get(0))
+				break;
+		}
+		if(i==0)
+			correctedData= memoryVectVect.get(0);
+		else if(i==memoryVectVect.size())
+			correctedData= memoryVectVect.get(memoryVectVect.size()-1);
+		else{
+			Double ratio = (originalData.get(0)-memoryVectVect.get(i-1).get(0))/
+					(memoryVectVect.get(i).get(0)-memoryVectVect.get(i-1).get(0));
+			for(int j=1;j<originalData.size();j++){//矩阵第一个值不需要修正
+				Double deat = ratio*(memoryVectVect.get(i).get(j)-memoryVectVect.get(i-1).get(j));
+				System.out.println("i="+i+",j="+j+",originalData.size="+originalData.size()+",memoryVectVect.get(i-1).size="+memoryVectVect.get(i-1).size());
+				correctedData.set(j, memoryVectVect.get(i-1).get(j)+deat);
+				
+			}
+		}
+		
+		for(int j=0;j<correctedData.size();j++)
+			correctedData.set(j, correctedData.get(j)*standardVect.get(j).getMax()+standardVect.get(j).getMin());
+		return correctedData;
+	}
+	/**
+	 * 获取所有风机
+	 * @param dcid
+	 * @return
+	 */
 	public Vector<WindGenParaBean>getFjBm(String dcid){
 		
 		Vector<String>fjVect = new Vector<String>();
@@ -73,9 +124,35 @@ public class CalNSETResult {
 		
 		return ret;
 	}
+	
+	/**
+	 * 向数据库中写残差数据
+	 * @param windGenVect
+	 * @param strDate
+	 */
 	public void writeResidual2Db(Vector<WindGenParaBean>windGenVect,String strDate){
-		String sqlStr = "INSERT INTO NEPUBDB.XNYZCDB.NSETDATA"+
-		"(DCID,DCMC,FJID,FJMC,SID,SNAME,RQ,SD1,SD2,SD3,SD4,SD5,SD6,SD7,SD8,SD9,SD10,SD11,SD12,SD13,SD14,SD15,SD16,SD17,SD18,SD19,SD20, "+
+		DBOperate dbo = new DBOperate();
+		try {
+			dbo.connect("newhisdb");
+		} catch (ClassNotFoundException e) {
+			e.printStackTrace();
+		} catch (SQLException e) {
+			e.printStackTrace();
+		}
+
+		String delStr = "delete from  NEPUBDB.XNYZCDB.NSETDATA where rq='"+strDate+"'";
+		try {
+			dbo.executeUpdate(delStr);
+		} catch (SQLException e2) {
+			e2.printStackTrace();
+		}
+		try {
+			dbo.commit();
+		} catch (SQLException e2) {
+			e2.printStackTrace();
+		}
+		String sqlStr = "INSERT INTO NEPUBDB.XNYZCDB.NSETDATA "+
+		"(STIME,DCID,DCMC,FJID,FJMC,SID,SNAME,RQ,SD1,SD2,SD3,SD4,SD5,SD6,SD7,SD8,SD9,SD10,SD11,SD12,SD13,SD14,SD15,SD16,SD17,SD18,SD19,SD20, "+
 		"SD21,SD22,SD23,SD24,SD25,SD26,SD27,SD28,SD29,SD30,SD31,SD32,SD33,SD34,SD35,SD36,SD37,SD38,SD39,SD40, "+
 		"SD41,SD42,SD43,SD44,SD45,SD46,SD47,SD48,SD49,SD50,SD51,SD52,SD53,SD54,SD55,SD56,SD57,SD58,SD59,SD60, "+
 		"SD61,SD62,SD63,SD64,SD65,SD66,SD67,SD68,SD69,SD70,SD71,SD72,SD73,SD74,SD75,SD76,SD77,SD78,SD79,SD80, "+
@@ -90,7 +167,8 @@ public class CalNSETResult {
 		"SD241,SD242,SD243,SD244,SD245,SD246,SD247,SD248,SD249,SD250,SD251,SD252,SD253,SD254,SD255,SD256,SD257,SD258,SD259,SD260, "+
 		"SD261,SD262,SD263,SD264,SD265,SD266,SD267,SD268,SD269,SD270,SD271,SD272,SD273,SD274,SD275,SD276,SD277,SD278,SD279,SD280, "+
 		"SD281,SD282,SD283,SD284,SD285,SD286,SD287,SD288) VALUES(";
-		String valueQuery = "?,?,?,?,?,?,?";
+		String valueQuery = "?,?,?,?,?,?,?,?";
+
 		for(int i=0;i<windGenVect.get(0).getResult().size();i++){
 			valueQuery+=",?";
 		}
@@ -98,49 +176,87 @@ public class CalNSETResult {
 		sqlStr+=valueQuery;
 		Vector<Vector<Object>> paraVecVec=new Vector<Vector<Object>>();
 		for(int i=0;i<windGenVect.size();i++){
-			Vector<Object> firstRow = new Vector<Object>();
-			firstRow.add(windGenVect.get(i).getDcid());
-			firstRow.add(windGenVect.get(i).getDcmc());
-			firstRow.add(windGenVect.get(i).getFjid());
-			firstRow.add(windGenVect.get(i).getFjmc());
-			firstRow.add("ResidualAvg");
-			firstRow.add("残差均值");
-			firstRow.add(strDate);
+			String stime = Utilities.getSysTime();
+
+			
+			Vector<Object> qualRow = new Vector<Object>();
+			qualRow.add(stime);
+			qualRow.add(windGenVect.get(i).getDcid());
+			qualRow.add(windGenVect.get(i).getDcmc());
+			qualRow.add(windGenVect.get(i).getFjid());
+			qualRow.add(windGenVect.get(i).getFjmc());
+			qualRow.add("DataQual");
+			qualRow.add("数据质量");
+			qualRow.add(strDate);
+			
+			Vector<Object> avgRow = new Vector<Object>();
+			avgRow.add(stime);
+			avgRow.add(windGenVect.get(i).getDcid());
+			avgRow.add(windGenVect.get(i).getDcmc());
+			avgRow.add(windGenVect.get(i).getFjid());
+			avgRow.add(windGenVect.get(i).getFjmc());
+			avgRow.add("ResidualAvg");
+			avgRow.add("残差均值");
+			avgRow.add(strDate);
 			for(int j=0;j<windGenVect.get(i).getResult().size();j++){
-				firstRow.add(windGenVect.get(i).getResult().get(j).get(0));
+				avgRow.add(windGenVect.get(i).getResult().get(j).get(0));
+				if(windGenVect.get(i).getResult().get(j).get(0)>avgBound||
+						windGenVect.get(i).getResult().get(j).get(1)>sqtBound){
+					qualRow.add("NO");
+				}else{
+					qualRow.add("YES");
+				}
+			}
+			paraVecVec.add(avgRow);
+			
+			
+			Vector<Object> sqtRow = new Vector<Object>();
+			sqtRow.add(stime);
+			sqtRow.add(windGenVect.get(i).getDcid());
+			sqtRow.add(windGenVect.get(i).getDcmc());
+			sqtRow.add(windGenVect.get(i).getFjid());
+			sqtRow.add(windGenVect.get(i).getFjmc());
+			sqtRow.add("ResidualSqt");
+			sqtRow.add("残差均方根");
+			sqtRow.add(strDate);
+			for(int j=0;j<windGenVect.get(i).getResult().size();j++){
+				sqtRow.add(windGenVect.get(i).getResult().get(j).get(1));
+			}
+			paraVecVec.add(sqtRow);
+			
+			paraVecVec.add(qualRow);
+			
+			Vector<Object> correctRow = new Vector<Object>();
+			correctRow.add(stime);
+			correctRow.add(windGenVect.get(i).getDcid());
+			correctRow.add(windGenVect.get(i).getDcmc());
+			correctRow.add(windGenVect.get(i).getFjid());
+			correctRow.add(windGenVect.get(i).getFjmc());
+			correctRow.add("CorrectedData");
+			correctRow.add("修正数据");
+			correctRow.add(strDate);
+			for(int j=0;j<windGenVect.get(i).getResult().size();j++){
+				Vector<Double>correctedData = new Vector<Double>();
+				if(qualRow.get(j+8).toString().compareTo("NO")==0){
+					correctedData = this.correctData(windGenVect.get(i).getObserveData().get(j),
+							windGenVect.get(i).getMemoryMatrix());
+					
+				}else{
+					for(int k=0;k<windGenVect.get(i).getIdsStrArr().length;k++){
+						correctedData.add(-1d);
+					}
+				}
+				String data2db = "";
+				for(int k=0;k<windGenVect.get(i).getIdsStrArr().length;k++){
+					data2db+=correctedData.get(k)+",";
+				}
+				data2db = data2db.substring(0, data2db.length()-1);
+				correctRow.add(data2db);
 			}
 			
-//			oneRow.add("ResidualSqt");
-			paraVecVec.add(firstRow);
-			
-			Vector<Object> secondRow = new Vector<Object>();
-			secondRow.add(windGenVect.get(i).getDcid());
-			secondRow.add(windGenVect.get(i).getDcmc());
-			secondRow.add(windGenVect.get(i).getFjid());
-			secondRow.add(windGenVect.get(i).getFjmc());
-			secondRow.add("ResidualSqt");
-			secondRow.add("残差均方根");
-			secondRow.add(strDate);
-			for(int j=0;j<windGenVect.get(i).getResult().size();j++){
-				secondRow.add(windGenVect.get(i).getResult().get(j).get(1));
-			}
-			paraVecVec.add(secondRow);
+			paraVecVec.add(correctRow);
 		}
-		DBOperate dbo = new DBOperate();
-		try {
-			dbo.connect("newhisdb");
-		} catch (ClassNotFoundException e) {
-			e.printStackTrace();
-		} catch (SQLException e) {
-			e.printStackTrace();
-		}
-		try {
-			dbo.connect("newhisdb");
-		} catch (ClassNotFoundException e) {
-			e.printStackTrace();
-		} catch (SQLException e) {
-			e.printStackTrace();
-		}
+
 		
 		try {
 			dbo.executeBatchUpdate(sqlStr, paraVecVec);
@@ -158,12 +274,19 @@ public class CalNSETResult {
 			e.printStackTrace();
 		}
 	}
+	
+	/**
+	 * 计算预测向量
+	 * @param windGenVect
+	 * @param strDate
+	 */
 	public void calForcast(Vector<WindGenParaBean>windGenVect,String strDate){
 		CalMemoryMatrix calMM = new CalMemoryMatrix();
 		Main main = new Main();
 		for(int i=0;i<windGenVect.size();i++){
 			Vector<Vector<Double>>observeData = new Vector<Vector<Double>>();
 			observeData = calMM.getManyDayData(windGenVect.get(i).getIdsStrArr(), strDate, 1);
+			windGenVect.get(i).setObserveData(observeData);
 			Vector<Vector<Double>>oneGenADayResult = new Vector<Vector<Double>>();
 			
 			for(int j=0;j<observeData.size();j++){
@@ -181,6 +304,7 @@ public class CalNSETResult {
 		Vector<WindGenParaBean>windGenVect = calNset.getFjBm(dcbm);
 		calNset.calForcast(windGenVect,"2017-12-01");
 		calNset.writeResidual2Db(windGenVect,"2017-12-01");
+		
 		System.out.println("down");
 	}
 }

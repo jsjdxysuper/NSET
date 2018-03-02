@@ -25,30 +25,6 @@ public class Main {
 	private static int index;
 	private double avgBound;
 	private double sqtBound;
-	public Main(){
-		Env env = Env.getInstance();
-		RemoveExtremNum = Integer.parseInt(env.get("RemoveExtremNum").toString());
-		RangeGetAvg = Integer.parseInt(env.get("RangeGetAvg").toString());
-		
-		String standardMinMaxArray[] = env.get("StandardMinMax").toString().split(";");
-		standardVect = new Vector<StandardData>();
-		for(int i=0;i<standardMinMaxArray.length;i++){
-			Double min = Double.parseDouble(standardMinMaxArray[i].split(",")[0].toString());
-			Double max = Double.parseDouble(standardMinMaxArray[i].split(",")[1].toString());
-			StandardData temp = new StandardData(min,max);
-			standardVect.add(temp);
-		}
-		
-		String sjidArrayStr = env.getProperty("SJID");
-		String sjmcArrayStr = env.getProperty("SJMC");
-		sjidArray = sjidArrayStr.split(",");
-		sjmcArray = sjmcArrayStr.split(",");
-		
-		String writeOrWrongBound = env.getProperty("RightOrWrongBound");
-		avgBound = Double.parseDouble(writeOrWrongBound.split(",")[0]);
-		sqtBound = Double.parseDouble(writeOrWrongBound.split(",")[1]);
-	}
-	
 	
 	public static void main(String[] args) throws ClassNotFoundException, SQLException, IOException {
 
@@ -73,11 +49,62 @@ public class Main {
 		main.writeDb(oneDayAvgSqtVect, strDate);
 		
 	}
+	public Main(){
+		Env env = Env.getInstance();
+		RemoveExtremNum = Integer.parseInt(env.get("RemoveExtremNum").toString());
+		RangeGetAvg = Integer.parseInt(env.get("RangeGetAvg").toString());
+		
+		String standardMinMaxArray[] = env.get("StandardMinMax").toString().split(";");
+		standardVect = new Vector<StandardData>();
+		for(int i=0;i<standardMinMaxArray.length;i++){
+			Double min = Double.parseDouble(standardMinMaxArray[i].split(",")[0].toString());
+			Double max = Double.parseDouble(standardMinMaxArray[i].split(",")[1].toString());
+			StandardData temp = new StandardData(min,max);
+			standardVect.add(temp);
+		}
+		
+		String sjidArrayStr = env.getProperty("SJID");
+		String sjmcArrayStr = env.getProperty("SJMC");
+		sjidArray = sjidArrayStr.split(",");
+		sjmcArray = sjmcArrayStr.split(",");
+		
+		String writeOrWrongBound = env.getProperty("RightOrWrongBound");
+		avgBound = Double.parseDouble(writeOrWrongBound.split(",")[0]);
+		sqtBound = Double.parseDouble(writeOrWrongBound.split(",")[1]);
+	}
+	/**
+	 * 获取所有风机编码信息
+	 */
+	public static void getAllFjbm(){
+		DBOperate dbo = new DBOperate();
+		try {
+			dbo.connect("newhisdb");
+		} catch (ClassNotFoundException e) {
+			e.printStackTrace();
+		} catch (SQLException e) {
+			e.printStackTrace();
+		}
+		
+		String fjbmSql = "select ssdc,kw,fdjzjwdxx_jzid,d5000id,fsid,dlid,dyid from NEPUBDB.NEPUBDB.FJBM";
+		Vector<Vector<Object>>fjbmVec = new Vector<Vector<Object>>();
+		try {
+			fjbmVec = dbo.executeQuery(fjbmSql);
+		} catch (SQLException e1) {
+			e1.printStackTrace();
+		}
+		
+		try {
+			dbo.close();
+		} catch (SQLException e) {
+			e.printStackTrace();
+		}
+	}
+
 	
 	public void writeDb(Vector<Vector<Double>> oneDayAvgSqtVect,String strDate){
 		DBOperate dbo = new DBOperate();
 		try {
-			dbo.connect("hisdb");
+			dbo.connect("newhisdb");
 		} catch (ClassNotFoundException e) {
 			e.printStackTrace();
 		} catch (SQLException e) {

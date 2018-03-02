@@ -16,6 +16,7 @@ import com.kedong.nset.base.Utilities;
 import com.kedong.nset.bean.WindGenParaBean;
 
 public class CalMemoryMatrix {
+	private static int MINSAMPLENUM = 100;//最小样本数量
 	private String sjidArrayStr;
 	private String sjmcArrayStr;
 	private Vector<StandardData>standardVect;
@@ -44,36 +45,85 @@ public class CalMemoryMatrix {
 	}
 	
 	
-	public static void main(String[] args) throws ClassNotFoundException, SQLException, IOException {
+	public static void main(String[] args) {
 
 		String timeStr = Utilities.getSysTime();
 		String dateStr = Utilities.getToday();
 		
 		CalMemoryMatrix calMemory = new CalMemoryMatrix();
 		calMemory.dateTimeStr = dateStr+" "+timeStr;
-		System.out.println("ok");
+
 		String strDate = "2017-11-04";
 		String hisStrDate=Utilities.getAddDay(strDate, -30);
-		Vector<Vector<Double>> samplesVector = new Vector<Vector<Double>>();
 		
-		Vector<WindGenParaBean>onePlantGenBeanVec = calMemory.searchWindGenBaseData("hrlg");
+		Vector<Vector<Object>>plantInfoVec  = new Vector<Vector<Object>>();
+		//dcid,dcmc,fjts
+		plantInfoVec = getAllPlant();
 		
-		for(int i=0;i<onePlantGenBeanVec.size();i++){
-			samplesVector = calMemory.getManyDayData(onePlantGenBeanVec.get(i).getIdsStrArr(),hisStrDate,30);
-			Vector<Vector<Double>> memoryVect = calMemory.calMemVect(samplesVector);
-			calMemory.writeDb(onePlantGenBeanVec.get(i).getDcid(),onePlantGenBeanVec.get(i).getDcmc(),
-					onePlantGenBeanVec.get(i).getFjid(),onePlantGenBeanVec.get(i).getFjmc(),memoryVect,calMemory.dateTimeStr );
+		for(int j=0;j<plantInfoVec.size();j++){
+			String plantId = plantInfoVec.get(j).get(0).toString();
+		
+		
+			Vector<Vector<Double>> samplesVector = new Vector<Vector<Double>>();
+			
+			Vector<WindGenParaBean>onePlantGenBeanVec = calMemory.searchWindGenBaseData(plantId);
+			
+			for(int i=0;i<onePlantGenBeanVec.size();i++){
+				samplesVector = calMemory.getManyDayData(onePlantGenBeanVec.get(i).getIdsStrArr(),hisStrDate,30);
+				if(samplesVector.size()<MINSAMPLENUM)continue;
+				Vector<Vector<Double>> memoryVect;
+				try {
+					memoryVect = calMemory.calMemVect(samplesVector);
+				} catch (Exception e) {
+					e.printStackTrace();
+					continue;
+				}
+				calMemory.writeDb(onePlantGenBeanVec.get(i).getDcid(),onePlantGenBeanVec.get(i).getDcmc(),
+						onePlantGenBeanVec.get(i).getFjid(),onePlantGenBeanVec.get(i).getFjmc(),memoryVect,calMemory.dateTimeStr );
+			}
 		}
-		
-//		
-//		Vector<Vector<Double>> memoryVect = calMemory.calMemVect(samplesVector);
 		System.out.println("avgCenter ok");
-//
-//
-//		calMemory.writeDb(memoryVect);
 		
 	}
-	public Vector<WindGenParaBean> searchWindGenBaseData(String dcid){
+	
+	/**
+	 * 获取所有可用风电场信息
+	 * @return
+	 */
+	public static Vector<Vector<Object>> getAllPlant(){
+		DBOperate dbo = new DBOperate();
+		try {
+			dbo.connect("newhisdb");
+		} catch (ClassNotFoundException e) {
+			e.printStackTrace();
+		} catch (SQLException e) {
+			e.printStackTrace();
+		}
+		
+		String fjbmSql = "select dcid,dcmc,fjts from HISDB.XNYZCDB.DCHISBM where is_use='1'";
+		Vector<Vector<Object>>plantInfoVec = new Vector<Vector<Object>>();
+		try {
+			plantInfoVec = dbo.executeQuery(fjbmSql);
+		} catch (SQLException e1) {
+			e1.printStackTrace();
+		}
+		
+		try {
+			dbo.close();
+		} catch (SQLException e) {
+			e.printStackTrace();
+		}
+		
+		return plantInfoVec;
+	}
+	
+	/**
+	 * 获取某电厂的所有风机编码信息
+	 * @param dcid
+	 * @return
+	 * @throws EludeException 
+	 */
+	public Vector<WindGenParaBean> searchWindGenBaseData(String dcid) throws EludeException{
 		Vector<WindGenParaBean> windGenParaIdVec = new Vector<WindGenParaBean>();
 //		String sqlStr = "select SSDC,KW,FDJZJWDXX_JZID,D5000ID,FSID,DLID,DYID,D5000MC,FSMC,DLMC,DYMC " +
 //				"from NEPUBDB.NEPUBDB.FJBM "+
@@ -106,6 +156,8 @@ public class CalMemoryMatrix {
 			String idsStrArray[] = new String[paraNum];
 			String mcsStrArray[] = new String[paraNum];
 			for(int j=0;j<paraNum;j++){
+				if(rst==null)throw new EludeException("风机编码id不全");
+				
 				idsStrArray[j] = rst.get(i).get(j+4).toString();
 				mcsStrArray[j] = rst.get(i).get(j+8).toString();
 			}
@@ -183,60 +235,29 @@ public class CalMemoryMatrix {
 			e.printStackTrace();
 		}
 	}
-	public Vector<Double>calAvgSqt(Vector<Double>seeVect,Vector<Vector<Double>> memoryVect){
-//		Vector<Double>seeVect = new Vector<Double>();
-//		seeVect.add(0.346);seeVect.add(0.2584);
-//		seeVect.add(0.5805);seeVect.add(0.7985);
-		
-		CalMemoryMatrix main = new CalMemoryMatrix();
-		Matrix memoryMatrix = main.convert2Matrix(memoryVect);
-		Matrix weightMatrix = main.calculateWeight(memoryVect,seeVect);
-		
-		Matrix outputMatrix = memoryMatrix.times(weightMatrix);
-		
-		//残差向量
-		Matrix residualMatrix = new Matrix(outputMatrix.getRowDimension(),1);
 
-		for(int i=0;i<outputMatrix.getRowDimension();i++){
-			residualMatrix.set(i, 0, outputMatrix.get(i, 0)-seeVect.get(i));
-		}
-		
-		Double sqt = 0d;
-		Double avg = 0d;
-		for(int i=0;i<residualMatrix.getRowDimension();i++){
-			avg +=residualMatrix.get(i, 0);
-		}
-		avg = avg/residualMatrix.getRowDimension();
-		
-		for(int i=0;i<residualMatrix.getRowDimension();i++){
-			sqt += Math.pow(residualMatrix.get(i, 0)-avg, 2);
-		}
-		sqt = Math.sqrt(sqt/residualMatrix.getRowDimension());
-		System.out.println("output ok,avg:"+avg+",sqt:"+sqt);
-		Vector<Double>retVect = new Vector<Double>();
-		retVect.add(avg);
-		retVect.add(sqt);
-		return retVect;
-	}
+
 	
 	/**
 	 * 计算记忆向量
 	 * @param samplesVector
 	 * @return
+	 * @throws Exception 
 	 */
-	public Vector<Vector<Double>> calMemVect(Vector<Vector<Double>> samplesVector){
+	public Vector<Vector<Double>> calMemVect(Vector<Vector<Double>> samplesVector) throws Exception{
 		CalMemoryMatrix main = new CalMemoryMatrix();
 		Vector<Vector<Double>>memoryVect = new Vector<Vector<Double>>();
 		
 		for(double x=0;x<1;x=x+0.1){
 			Vector<Vector<Double>> vectorRange = new Vector<Vector<Double>>();
 			for(int i=0;i<samplesVector.size();i++){
+				if(samplesVector.get(i).get(0)>10)throw new Exception("上下限或者出力单位有问题");
 				if(x+0.02<samplesVector.get(i).get(0)&&
 						x+0.08>samplesVector.get(i).get(0)){
 					vectorRange.add(samplesVector.get(i));
 				}
 			}
-			System.out.println("ok");
+//			System.out.println("ok");
 			if(vectorRange==null||vectorRange.size()==0)
 				continue;
 			int willRemove = (vectorRange.get(0).size()-1)*2*main.getRemoveExtremNum();
@@ -249,7 +270,36 @@ public class CalMemoryMatrix {
 			
 			memoryVect.add(avgCenterVect);
 		}
+		
+		Vector<Vector<Double>> minVectors = new Vector<Vector<Double>>();
+		for(int i=0;i<samplesVector.size();i++){
+			
+			if(samplesVector.get(i).get(0)<0.01&&samplesVector.get(i).get(0)>0)
+				minVectors.add(samplesVector.get(i));
+			
+		}
+		Vector<Double>minVect = main.getAvgVect(minVectors);
+		
+		Vector<Vector<Double>> maxVectors = new Vector<Vector<Double>>();
+		for(int i=0;i<samplesVector.size();i++){
+			
+			if(samplesVector.get(i).get(0)<1&&samplesVector.get(i).get(0)>0.99)
+				maxVectors.add(samplesVector.get(i));
+			
+		}
+//		System.out.println("计算风电场："+)
+		if(maxVectors.size()<1)throw new EludeException("最大值处，向量数量为0");
+		Vector<Double>maxVect = main.getAvgVect(maxVectors);
+		memoryVect.insertElementAt(minVect, 0);
+		memoryVect.insertElementAt(maxVect, memoryVect.size());
 		return memoryVect;
+	}
+	class EludeException extends Exception{
+
+		public EludeException(String string) {
+			super(string);
+		}
+		
 	}
 	/**
 	 * 计算两个矩阵的欧氏距离
@@ -338,12 +388,13 @@ public class CalMemoryMatrix {
 				public int compare(Vector<Double> o1, Vector<Double> o2) {
 					Vector<Double>v1 = (Vector<Double>)o1;
 					Vector<Double>v2 = (Vector<Double>)o2;
-					if(v1.get(index)==v2.get(index))
-						return 0;
-					else if(v1.get(index)<v2.get(index))
-						return 1;
-					else 
-						return -1;
+					return v2.get(index).compareTo(v1.get(index));
+//					if(v1.get(index)==v2.get(index))
+//						return 0;
+//					else if(v1.get(index)<v2.get(index))
+//						return 1;
+//					else 
+//						return -1;
 				}
 
 			});
@@ -358,9 +409,9 @@ public class CalMemoryMatrix {
 	}
 	
 	/**
-	 * 取中间一些向量的平均值
-	 * @param original
-	 * @param avg
+	 * 取离平均向量近的一些向量的平均值
+	 * @param original 去掉极大极小值的所有向量
+	 * @param avg 均值向量
 	 * @return
 	 */
 	public  Vector<Double>getCenterAvgVect(Vector<Vector<Double>>original,Vector<Double> avg){
@@ -520,8 +571,7 @@ public class CalMemoryMatrix {
 //				} catch (IOException e) {
 //					e.printStackTrace();
 //				}
-				System.out.println();
-				System.out.println();
+
 				
 			}
 			strDate = Utilities.getTomorrow(strDate);

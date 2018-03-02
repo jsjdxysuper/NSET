@@ -14,7 +14,9 @@ public class WindGenParaBean {
 	private String mcsStrArr[];
 	
 	private Vector<Vector<Double>>result = new Vector<Vector<Double>>();//均值，方差
-	private Vector<Vector<Double>>amendData = new Vector<Vector<Double>>();
+	private Vector<Vector<Double>>amendData = new Vector<Vector<Double>>();//修正后数据
+	private Vector<Vector<Double>>observeData = new Vector<Vector<Double>>();//修正后数据
+	
 	public String getDcid() {
 		return dcid;
 	}
@@ -68,6 +70,12 @@ public class WindGenParaBean {
 	}
 	public void setAmendData(Vector<Vector<Double>> amendData) {
 		this.amendData = amendData;
+	}
+	public Vector<Vector<Double>> getObserveData() {
+		return observeData;
+	}
+	public void setObserveData(Vector<Vector<Double>> observeData) {
+		this.observeData = observeData;
 	}
 	
 	
