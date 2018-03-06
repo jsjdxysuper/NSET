@@ -14,17 +14,32 @@ import com.kedong.nset.base.DBOperate;
 import com.kedong.nset.base.Env;
 import com.kedong.nset.base.Utilities;
 import com.kedong.nset.bean.WindGenParaBean;
+import com.kedong.nset.exception.AbsenceWindGenIdBM;
+import com.kedong.nset.exception.NoEnoughWindGenEx;
 
 public class CalMemoryMatrix {
 	private static int MINSAMPLENUM = 100;//最小样本数量
+	private static int MinNumOfMinMax = 10;//最小最大样本最小数量
+	
+	private static double MinOfMin = 0;
+	private static double MaxOfMin = 0.02;
+	private static double MinOfMax = 0.99;
+	private static double MaxOfMax = 1.1;
+	
+	private static boolean IS_SHOW_SQL = false;
 	private String sjidArrayStr;
 	private String sjmcArrayStr;
+	//存储各分量的最小最大值并且计算标幺值
 	private Vector<StandardData>standardVect;
 	private  int RemoveExtremNum = 0;
 	private  int RangeGetAvg = 0;
 	private static int index;
 	private final int paraNum = 4;
+	
+	//记录程序启动的时间
 	private String dateTimeStr;
+	
+	//读取配置文件
 	public CalMemoryMatrix(){
 		Env env = Env.getInstance();
 		RemoveExtremNum = Integer.parseInt(env.get("RemoveExtremNum").toString());
@@ -45,8 +60,9 @@ public class CalMemoryMatrix {
 	}
 	
 	
-	public static void main(String[] args) {
+	public static void main(String[] args) throws NoEnoughWindGenEx, AbsenceWindGenIdBM {
 
+		//写库时间记入数据库
 		String timeStr = Utilities.getSysTime();
 		String dateStr = Utilities.getToday();
 		
@@ -62,15 +78,26 @@ public class CalMemoryMatrix {
 		
 		for(int j=0;j<plantInfoVec.size();j++){
 			String plantId = plantInfoVec.get(j).get(0).toString();
+//			String plantId = "bpsw";
 		
 		
 			Vector<Vector<Double>> samplesVector = new Vector<Vector<Double>>();
 			
-			Vector<WindGenParaBean>onePlantGenBeanVec = calMemory.searchWindGenBaseData(plantId);
-			
+			Vector<WindGenParaBean> onePlantGenBeanVec = null;
+
+			onePlantGenBeanVec = calMemory.searchWindGenBaseData(plantId);
+	
+			int fjts = Integer.parseInt(plantInfoVec.get(j).get(2).toString());
+			if(onePlantGenBeanVec.size()!=fjts)
+				throw new NoEnoughWindGenEx(plantInfoVec.get(j).get(1).toString()+"风机台数没有对应上");
 			for(int i=0;i<onePlantGenBeanVec.size();i++){
-				samplesVector = calMemory.getManyDayData(onePlantGenBeanVec.get(i).getIdsStrArr(),hisStrDate,30);
-				if(samplesVector.size()<MINSAMPLENUM)continue;
+				samplesVector = calMemory.getManyDayData(onePlantGenBeanVec.get(i),hisStrDate,30);
+				if(samplesVector.size()<MINSAMPLENUM){
+					System.err.println("风电场:"+ plantInfoVec.get(j).get(0).toString()+
+							",id:"+plantId+",风机："+onePlantGenBeanVec.get(i).getFjid()+
+							",没有足够的样本："+samplesVector.size()+",最小："+MINSAMPLENUM);
+					break;
+				}
 				Vector<Vector<Double>> memoryVect;
 				try {
 					memoryVect = calMemory.calMemVect(samplesVector);
@@ -92,6 +119,7 @@ public class CalMemoryMatrix {
 	 */
 	public static Vector<Vector<Object>> getAllPlant(){
 		DBOperate dbo = new DBOperate();
+		dbo.setShowSQL(IS_SHOW_SQL);
 		try {
 			dbo.connect("newhisdb");
 		} catch (ClassNotFoundException e) {
@@ -119,19 +147,29 @@ public class CalMemoryMatrix {
 	
 	/**
 	 * 获取某电厂的所有风机编码信息
+	 * 所属电厂id，名称、jzid，一次系统图元件名称，d5000有功id，风速id，电流id，电压id，
+	 * 有功名称，风速名称，电流名称，电压名称
 	 * @param dcid
 	 * @return
 	 * @throws EludeException 
+	 * @throws AbsenceWindGenIdBM 
 	 */
-	public Vector<WindGenParaBean> searchWindGenBaseData(String dcid) throws EludeException{
+	public Vector<WindGenParaBean> searchWindGenBaseData(String dcid) throws AbsenceWindGenIdBM{
 		Vector<WindGenParaBean> windGenParaIdVec = new Vector<WindGenParaBean>();
 //		String sqlStr = "select SSDC,KW,FDJZJWDXX_JZID,D5000ID,FSID,DLID,DYID,D5000MC,FSMC,DLMC,DYMC " +
 //				"from NEPUBDB.NEPUBDB.FJBM "+
 //				"where ssdc='"+dcid+"' order by FDJZJWDXX_JZID";
-		String sqlStr = "select SSDC,KW,FDJZJWDXX_JZID,GRAPH.ELEMENT_NAME,D5000ID,FSID,DLID,DYID,D5000MC,FSMC,DLMC,DYMC "+ 
-						"from NEPUBDB.NEPUBDB.FJBM FJBM,NEPUBDB.XNYZCDB.WINDGEN2GRAPHELE GRAPH "+
-						"where ssdc='"+dcid+"' AND FJBM.SSDC=GRAPH.DCID AND FJBM.FDJZJWDXX_JZID=GRAPH.WINDGEN_ID order by to_number(FDJZJWDXX_JZID)";	
+		String sqlStr = "select SSDC,KW,FDJZJWDXX_JZID,GRAPH.ELEMENT_NAME,D5000ID,FSID,DLID,DYID, "+
+				"D5000MC,FSMC,DLMC,DYMC , "+
+				"XH.FJMC,XH.EDRL,XH.EDFS "+
+				"from NEPUBDB.NEPUBDB.FJBM FJBM,NEPUBDB.XNYZCDB.WINDGEN2GRAPHELE GRAPH , "+
+				"NEPUBDB.NEPUBDB.FDJZXHXX XH,NEPUBDB.NEPUBDB.FDJZJWDXX JWD "+
+				"where ssdc='"+dcid+"' AND FJBM.SSDC=GRAPH.DCID  "+
+				"AND FJBM.FDJZJWDXX_JZID=GRAPH.WINDGEN_ID  "+
+				"AND JWD.SSDCID=FJBM.SSDC AND JWD.JZID=FJBM.FDJZJWDXX_JZID "+
+				"AND JWD.JZXH=XH.FJMC ";	//order by to_number(FDJZJWDXX_JZID)
 		DBOperate dbo = new DBOperate();
+		dbo.setShowSQL(IS_SHOW_SQL);
 		try {
 			dbo.connect("newhisdb");
 		} catch (ClassNotFoundException e) {
@@ -156,11 +194,22 @@ public class CalMemoryMatrix {
 			String idsStrArray[] = new String[paraNum];
 			String mcsStrArray[] = new String[paraNum];
 			for(int j=0;j<paraNum;j++){
-				if(rst==null)throw new EludeException("风机编码id不全");
-				
+				if(rst.get(i).get(j+4)==null)throw new AbsenceWindGenIdBM("风机编码id不全,风场："
+						+rst.get(i).get(1).toString()+",id:"+dcid+"，风机："+rst.get(i).get(2).toString()+
+						",缺少id："+j);
 				idsStrArray[j] = rst.get(i).get(j+4).toString();
 				mcsStrArray[j] = rst.get(i).get(j+8).toString();
 			}
+			oneRow.setFjmc(rst.get(i).get(12).toString());
+			oneRow.setRatedCapacity(Double.parseDouble(rst.get(i).get(13).toString())*UnitConversion.MW2KW);
+			try{
+				oneRow.setRatedWindSpeed(Double.parseDouble(rst.get(i).get(14).toString()));
+			}catch(NullPointerException e){
+				System.err.println("风场："+rst.get(i).get(1).toString()+
+						"，风机："+rst.get(i).get(2).toString()+
+						"额定风速没有数据，型号："+rst.get(i).get(12).toString());
+			}
+			oneRow.calRatedElectric();
 			oneRow.setIdsStrArr(idsStrArray);
 			oneRow.setMcsStrArr(mcsStrArray);
 			windGenParaIdVec.add(oneRow);
@@ -177,6 +226,7 @@ public class CalMemoryMatrix {
 	
 	public void writeDb(String dcid,String dcmc,String fjid,String fjmc,Vector<Vector<Double>> memoryVectVect,String dateTimeStr){
 		DBOperate dbo = new DBOperate();
+		dbo.setShowSQL(IS_SHOW_SQL);
 		try {
 			dbo.connect("newhisdb");
 		} catch (ClassNotFoundException e) {
@@ -244,26 +294,28 @@ public class CalMemoryMatrix {
 	 * @return
 	 * @throws Exception 
 	 */
-	public Vector<Vector<Double>> calMemVect(Vector<Vector<Double>> samplesVector) throws Exception{
+	public Vector<Vector<Double>> calMemVect(Vector<Vector<Double>> samplesVector){
 		CalMemoryMatrix main = new CalMemoryMatrix();
 		Vector<Vector<Double>>memoryVect = new Vector<Vector<Double>>();
 		
 		for(double x=0;x<1;x=x+0.1){
 			Vector<Vector<Double>> vectorRange = new Vector<Vector<Double>>();
 			for(int i=0;i<samplesVector.size();i++){
-				if(samplesVector.get(i).get(0)>10)throw new Exception("上下限或者出力单位有问题");
+				if(samplesVector.get(i).size()<1)
+					continue;
 				if(x+0.02<samplesVector.get(i).get(0)&&
 						x+0.08>samplesVector.get(i).get(0)){
 					vectorRange.add(samplesVector.get(i));
 				}
 			}
-//			System.out.println("ok");
-			if(vectorRange==null||vectorRange.size()==0)
+			if(vectorRange.size()==0)//此档没有数据
 				continue;
-			int willRemove = (vectorRange.get(0).size()-1)*2*main.getRemoveExtremNum();
-			if(vectorRange.size()<=willRemove)
-				continue;
-			vectorRange = main.filterExtreme(vectorRange);
+//			{//下面为每组去除极值的代码
+//				int willRemove = (vectorRange.get(0).size()-1)*2*main.getRemoveExtremNum();
+//				if(vectorRange.size()<=willRemove)
+//					continue;
+//				vectorRange = main.filterExtreme(vectorRange);
+//			}
 			Vector<Double>avgVect = main.getAvgVect(vectorRange);
 			Vector<Double>avgCenterVect = main.getCenterAvgVect(vectorRange,avgVect);
 			
@@ -274,33 +326,32 @@ public class CalMemoryMatrix {
 		Vector<Vector<Double>> minVectors = new Vector<Vector<Double>>();
 		for(int i=0;i<samplesVector.size();i++){
 			
-			if(samplesVector.get(i).get(0)<0.01&&samplesVector.get(i).get(0)>0)
+			if(samplesVector.get(i).get(0)<MaxOfMin&&samplesVector.get(i).get(0)>MinOfMin)
 				minVectors.add(samplesVector.get(i));
 			
 		}
-		Vector<Double>minVect = main.getAvgVect(minVectors);
+		if(minVectors.size()>MinNumOfMinMax){
+			Vector<Double>minVect = main.getAvgVect(minVectors);
+			memoryVect.insertElementAt(minVect, 0);
+		}
+		
 		
 		Vector<Vector<Double>> maxVectors = new Vector<Vector<Double>>();
 		for(int i=0;i<samplesVector.size();i++){
 			
-			if(samplesVector.get(i).get(0)<1&&samplesVector.get(i).get(0)>0.99)
+			if(samplesVector.get(i).get(0)<MaxOfMax&&samplesVector.get(i).get(0)>MinOfMax)
 				maxVectors.add(samplesVector.get(i));
 			
 		}
-//		System.out.println("计算风电场："+)
-		if(maxVectors.size()<1)throw new EludeException("最大值处，向量数量为0");
-		Vector<Double>maxVect = main.getAvgVect(maxVectors);
-		memoryVect.insertElementAt(minVect, 0);
-		memoryVect.insertElementAt(maxVect, memoryVect.size());
-		return memoryVect;
-	}
-	class EludeException extends Exception{
 
-		public EludeException(String string) {
-			super(string);
+		if(maxVectors.size()>MinNumOfMinMax){
+			Vector<Double>maxVect = main.getAvgVect(maxVectors);
+			memoryVect.insertElementAt(maxVect, memoryVect.size());
 		}
 		
+		return memoryVect;
 	}
+
 	/**
 	 * 计算两个矩阵的欧氏距离
 	 * @param first
@@ -447,9 +498,9 @@ public class CalMemoryMatrix {
 	}
 	
 	/**
-	 * 求向量的每个分量均值得到的一个向量
+	 * 求向量的每个分量均值
 	 * @param original
-	 * @return
+	 * @return 均值向量
 	 */
 	public  Vector<Double>getAvgVect(Vector<Vector<Double>>original){
 		Vector<Double>avg = new Vector<Double>();
@@ -481,13 +532,13 @@ public class CalMemoryMatrix {
 	 * 获取数据库中的原始数据
 	 * Vector<Double>为包括所有类型数据的一个向量
 	 * @param strDateIn
-	 * @param count
+	 * @param count 天数
 	 * @return 每个内部Vector为一个时刻的所有观察数据
 	 * @throws ClassNotFoundException
 	 * @throws SQLException
 	 * @throws IOException
 	 */
-	public  Vector<Vector<Double>> getManyDayData(String sjidArray[],String strDateIn,int count){
+	public  Vector<Vector<Double>> getManyDayData(WindGenParaBean windGenForm,String strDateIn,int count){
 		FileWriter fw = null;
 		try {
 			fw = new FileWriter("C:\\work\\myeclipseworkspace\\NSET\\log.txt");
@@ -498,6 +549,7 @@ public class CalMemoryMatrix {
 		
 		String strDate = strDateIn;
 		DBOperate dbo = new DBOperate();
+		dbo.setShowSQL(IS_SHOW_SQL);
 		try {
 			dbo.connect("newhisdb");
 		} catch (ClassNotFoundException e) {
@@ -505,8 +557,13 @@ public class CalMemoryMatrix {
 		} catch (SQLException e) {
 			e.printStackTrace();
 		}
+		
+		
+		
 		Vector<Vector<Double>> samplesVector = new Vector<Vector<Double>>();
 		for(int j=0;j<count;j++){
+			double powerAvg = 0;
+			double powerSum = 0;//有功和，为了计算有功的标幺值
 			String sqlStr = "select * from HISDB.HISDB.ALGDATA_@ " +
 					"where sid=?";
 			sqlStr = sqlStr.replaceAll("@", strDate.replaceAll("-", ""));
@@ -516,27 +573,68 @@ public class CalMemoryMatrix {
 			Vector<Object>paraVect = new Vector<Object>();
 			Vector<List<Object>>allDataVect = new Vector<List<Object>>();
 			
-			for(int i=0;i<sjidArray.length;i++){
-				paraVect.add(sjidArray[i]);
+			for(int i=0;i<windGenForm.getIdsStrArr().length;i++){
+				paraVect.add(windGenForm.getIdsStrArr()[i]);
 				try {
 					rst = dbo.executePreparedQuery(sqlStr, paraVect);
 				} catch (SQLException e) {
 					e.printStackTrace();
 				}
+				if(rst.size()<1){
+					System.err.println("风电场："+windGenForm.getDcmc()+",风场id："+windGenForm.getDcid()+
+						"该风机"+windGenForm.getFjid()+","+strDate+"这一天没有数据");
+					allDataVect.clear();
+					break;//该天的数据就都不要啦
+				}
+				
 				List<Object>oneElementVect = rst.get(0).subList(2, rst.get(0).size());
 				paraVect.clear();
 				allDataVect.add(oneElementVect);
 			}
+
+			if(allDataVect.size()<1){
+				strDate = Utilities.getTomorrow(strDate);
+				continue;//该天的数据就都不要啦
+			}
 			
 
 			for(int i=0;i<allDataVect.get(0).size();i++){
+				Double val = Double.parseDouble(allDataVect.get(0).get(i).toString());
+				powerSum+=val;
+			}
+			powerAvg=powerSum/allDataVect.get(0).size();
+			
+			for(int i=0;i<allDataVect.get(0).size();i++){
 				Vector<Double> columnOne = new Vector<Double>();
 				
-				for(int k=0;k<allDataVect.size();k++){
+				for(int k=0;k<allDataVect.size();k++){//k代表取到值得类型
 					Double val = Double.parseDouble(allDataVect.get(k).get(i).toString());
-					Double standardVal = standardVect.get(k).standard(val);
-					columnOne.add(standardVal);
+					
+					if(k==0){//有功
+						if(val>(windGenForm.getRatedCapacity()/UnitConversion.MW2KW*2)){//单位为千瓦
+							if(val>windGenForm.getRatedCapacityMult())
+								break;//出力大于容量*1.1，直接取下一组数据
+							else
+								columnOne.add(val/windGenForm.getRatedCapacity());
+						}else{//单位为兆瓦
+							if(val>windGenForm.getRatedCapacityMult()/UnitConversion.MW2KW)
+								break;//出力大于容量*1.1，直接取下一组数据
+							else
+								columnOne.add(val*UnitConversion.MW2KW/windGenForm.getRatedCapacityMult());
+						}
+					}
+					else if(k==1){
+						columnOne.add(val/windGenForm.getRatedWindSpeed());
+					}
+					else if(k==2){
+						columnOne.add(val/windGenForm.getRatedElectric());
+					}
+					else if(k==3){
+						columnOne.add(val/windGenForm.getRatedVoltage());
+					}
+					
 				}
+				if(columnOne.size()<4)continue;
 				samplesVector.add(columnOne);
 				//后面的是输出和写文件
 //				for(int k=0;k<allDataVect.size();k++){
@@ -574,8 +672,10 @@ public class CalMemoryMatrix {
 
 				
 			}
+			
 			strDate = Utilities.getTomorrow(strDate);
 		}
+		
 		try {
 			fw.close();
 		} catch (IOException e) {

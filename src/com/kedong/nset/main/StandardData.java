@@ -3,6 +3,7 @@ package com.kedong.nset.main;
 public class StandardData {
 	private double max;
 	private double min;
+	private double ratedVal;//额定
 	private double val;
 	
 	public StandardData(double min,double max){
@@ -14,6 +15,9 @@ public class StandardData {
 		return (val-min)/(max-min);
 	}
 
+	public double PUValue(double val){
+		return val/ratedVal;
+	}
 	public double getMax() {
 		return max;
 	}
@@ -36,6 +40,14 @@ public class StandardData {
 
 	public void setVal(double val) {
 		this.val = val;
+	}
+
+	public double getRatedVal() {
+		return ratedVal;
+	}
+
+	public void setRatedVal(double ratedVal) {
+		this.ratedVal = ratedVal;
 	}
 	
 	

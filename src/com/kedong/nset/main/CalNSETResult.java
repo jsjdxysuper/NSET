@@ -285,7 +285,7 @@ public class CalNSETResult {
 		Main main = new Main();
 		for(int i=0;i<windGenVect.size();i++){
 			Vector<Vector<Double>>observeData = new Vector<Vector<Double>>();
-			observeData = calMM.getManyDayData(windGenVect.get(i).getIdsStrArr(), strDate, 1);
+			observeData = calMM.getManyDayData(windGenVect.get(i), strDate, 1);
 			windGenVect.get(i).setObserveData(observeData);
 			Vector<Vector<Double>>oneGenADayResult = new Vector<Vector<Double>>();
 			
